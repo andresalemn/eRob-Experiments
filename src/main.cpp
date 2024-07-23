@@ -19,7 +19,7 @@ float velocity;
 float torque;
 
 //Time Variables
-const long duration = 10; //in Sec
+const long duration = 50; //in Sec
 const long frecuency = 10; //in Hz
 unsigned long currentMillis;
 unsigned long previousMillisDuration;
@@ -41,8 +41,6 @@ void control()
   torque = erob_1.getTorque();
 
   /*Start of Control*/
-
-
   /*End of Control*/
 
   if (!erob_1.setTorque(targetTorque, 2000))
