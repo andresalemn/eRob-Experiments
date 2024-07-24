@@ -13,13 +13,17 @@ Finite State Machine (FSM) to implement control with a specific time and duratio
 #define CTRL_PIN 5
 
 //Actuator Variables
-float targetTorque = 0.0;
+float minTorque = 0.0;  // Minimum allowable torque
+float maxTorque = 20.0;  // Maximum allowable torque
+float setpointTorque = 0.0;
 float position;
 float velocity;
 float torque;
+bool validInput = false;
+
 
 //Time Variables
-const long duration = 50; //in Sec
+const long duration = 30; //in Sec
 const long frecuency = 10; //in Hz
 unsigned long currentMillis;
 unsigned long previousMillisDuration;
@@ -41,12 +45,11 @@ void control()
   torque = erob_1.getTorque();
 
   /*Start of Control*/
-  /*End of Control*/
-
-  if (!erob_1.setTorque(targetTorque, 2000))
+  if (!erob_1.setTorque(setpointTorque, 2000))
   {
     Serial.println("ERROR: SET TORQUE FAILED");
   }
+  /*End of Control*/
 }
 
 // Definition of States
@@ -66,7 +69,9 @@ enum OPTION : char
   OPTION_SET_CONTROL = '3',
   OPTION_SET_TORQUE_0 = '4',
   OPTION_HOME_POSITION = '5',
-  OPTION_MOTOR_RESPONSE = '6'  
+  OPTION_MOTOR_RESPONSE = '6',
+  OPTION_CHANGE_SETPOINT = '7'  
+  
 };
 
 State currentState = STATE_IDLE;
@@ -101,6 +106,7 @@ void loop()
       Serial.print("Set Torque 0: "); Serial.println(OPTION_SET_TORQUE_0 - '0');
       Serial.print("Home Position: "); Serial.println(OPTION_HOME_POSITION - '0');
       Serial.print("Motor Response: "); Serial.println(OPTION_MOTOR_RESPONSE - '0');
+      Serial.print("Change Setpoint: "); Serial.println(OPTION_CHANGE_SETPOINT - '0');
       Serial.println();
       currentState = STATE_WAITING_INPUT;
       break;
@@ -167,7 +173,8 @@ void loop()
           {
             previousMillisFrecuency = currentMillis;
             control();
-            Serial.printf("Position: %f, Velocity: %f,  Torque: %f.\n", position, velocity, torque);
+            //Serial.printf("Position= %f, Velocity= %f,  Torque= %f\n", position, velocity, torque);
+            Serial.printf("Setpoint= %f, Torque= %f\n", setpointTorque, torque);
           }
         }
         flag = false;
@@ -185,13 +192,17 @@ void loop()
 
       else if (input == OPTION_SET_TORQUE_0)
       {
-        if (!erob_1.setTorque(0.0, 2000))
-        {     
-          Serial.println("ERROR: SET TORQUE 0 FAILED");
-        }
-        else
+        for (int i = 0; i < 100; i++)
         {
-          Serial.println("SET TORQUE 0 SUCCEEDED");
+          if (!erob_1.setTorque(0.0, 2000))
+          {
+            Serial.println("ERROR: SET TORQUE 0 FAILED");
+          }
+          position = erob_1.getPosition();
+          velocity = erob_1.getVelocity();
+          torque = erob_1.getTorque();
+            Serial.printf("Setpoint= %f, Torque= %f\n", 0, torque);
+          delay(100);
         }
       }
 
@@ -213,6 +224,31 @@ void loop()
           {
             Serial.println("ERROR: READ MOTOR FAILED");
           }
+      }
+
+      else if (input == OPTION_CHANGE_SETPOINT)
+      {
+        Serial.printf("Please enter a torque value (%f - %f)", minTorque, maxTorque);
+        while (true) {
+          // Check if data is available to read
+          if (Serial.available() > 0) {
+            String input = Serial.readStringUntil('\n'); // Read the input as a string
+            input.trim(); // Remove any leading/trailing whitespace
+
+            setpointTorque = input.toFloat();
+
+            // Check if the input is valid and within range
+            if (input == "" || (setpointTorque == 0.0 && input != "0" && input != "0.0")) {
+                Serial.println("\nInvalid input. Please enter a valid number.");
+            } else if (setpointTorque < minTorque || setpointTorque > maxTorque) {
+                Serial.println("The value must be between " + String(minTorque) + " and " + String(maxTorque) + ". Please try again.");
+            } else {
+                Serial.print("\nYou have set the torque to: ");
+                Serial.println(setpointTorque);
+                break; // Exit the loop on successful input
+            }
+          }
+        }
       }
 
       else
