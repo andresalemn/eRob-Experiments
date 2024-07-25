@@ -5,12 +5,21 @@ Finite State Machine (FSM) to implement control with a specific time and duratio
 */
 #include <Arduino.h>
 #include "eRob.hpp"
+#include <ModbusRtu.h>
+#include <SoftwareSerial.h>
 
 //Pin Definition
 #define CS 22
 #define INT_PIN 15
 #define CAN_ID 0x01
 #define CTRL_PIN 5
+
+// data array for modbus network sharing
+uint16_t au16data[16];
+SoftwareSerial mySerial(16, 17); //Create a SoftwareSerial object so that we can use software serial. Search "software serial" on Arduino.cc to find out more details.
+Modbus master(0, mySerial, 5);
+modbus_t telegram;
+float dynamometer = 0;
 
 //Actuator Variables
 float minTorque = 0.0;  // Minimum allowable torque
@@ -19,8 +28,7 @@ float setpointTorque = 0.0;
 float position;
 float velocity;
 float torque;
-bool validInput = false;
-
+float dynamicTorqueSensor;
 
 //Time Variables
 const long duration = 30; //in Sec
@@ -29,6 +37,8 @@ unsigned long currentMillis;
 unsigned long previousMillisDuration;
 unsigned long previousMillisFrecuency;
 bool flag = false;
+
+#if eRobExp
 
 //eRob Instance
 eRob erob_1(eRob::eRob_90, CAN_ID, CS, INT_PIN, SPI);
@@ -43,6 +53,7 @@ void control()
   position = erob_1.getPosition();
   velocity = erob_1.getVelocity();
   torque = erob_1.getTorque();
+  dynamicTorqueSensor = dynSensor();  
 
   /*Start of Control*/
   if (!erob_1.setTorque(setpointTorque, 2000))
@@ -76,11 +87,25 @@ enum OPTION : char
 
 State currentState = STATE_IDLE;
 
+#endif eRobExp
+
 void setup()
 {
   Serial.begin(115200);
   SPI.begin();
   pinMode(CTRL_PIN, INPUT_PULLUP);
+
+  // Communication with the Virtual Torque Sensor
+  mySerial.begin(19200);
+  master.start();
+  master.setTimeOut( 200 ); // if there is no answer in 2000 ms, roll over
+  telegram.u8id = 1; // slave address
+  telegram.u8fct = 3; // function code (this one is registers read)
+  telegram.u16RegAdd = 0; // start address in slave // 0 -> Torque, 2 -> RPM
+  telegram.u16CoilsNo = 2; // number of elements (coils or registers) to read
+  telegram.au16reg = au16data; // pointer to a memory array in the Arduino
+
+  #if eRobExp
   if (!erob_1.initialize())
   {
     Serial.println("ERROR: MCP INITIALIZE FAILED");
@@ -90,10 +115,13 @@ void setup()
     Serial.println("MCP INITIALIZE SUCCEEDED");
   }
   delay(100);
+  #endif eRobExp
 }
 
+
 void loop()
-{ 
+{
+  #if eRobExp
   // Handling the state machine
   switch (currentState) 
   {
@@ -174,7 +202,7 @@ void loop()
             previousMillisFrecuency = currentMillis;
             control();
             //Serial.printf("Position= %f, Velocity= %f,  Torque= %f\n", position, velocity, torque);
-            Serial.printf("Setpoint= %f, Torque= %f\n", setpointTorque, torque);
+            Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);
           }
         }
         flag = false;
@@ -258,4 +286,18 @@ void loop()
       currentState = STATE_IDLE;
       break;
   }
+
+  #endif eRobExp
+
+  #if DynTest
+    master.query(telegram); // send query (only once)
+    master.poll(); // check incoming messages
+    if (master.getState() == COM_IDLE) 
+    {
+      dynamometer = (uint16_t(au16data[0]) << 16) | uint16_t (au16data[1]);
+      Serial.println(dynamometer/10);
+    }
+    delay(100);
+  #endif DynTest
+
 }
