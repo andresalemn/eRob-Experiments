@@ -13,16 +13,19 @@ Finite State Machine (FSM) to implement control with a specific time and duratio
 #define INT_PIN 15
 #define CAN_ID 0x01
 #define CTRL_PIN 5
+#define RX2 16
+#define TX2 17
+#define MODBUS_MODE_PIN 13
 
 // data array for modbus network sharing
-uint16_t au16data[16];
-SoftwareSerial mySerial(16, 17); //Create a SoftwareSerial object so that we can use software serial. Search "software serial" on Arduino.cc to find out more details.
-Modbus master(0, mySerial, 5);
+uint16_t au16data[16];    //Max Lenght Buffer Array
+SoftwareSerial mySerial(RX2, TX2); //Create a SoftwareSerial object so that we can use software serial. Search "software serial" on Arduino.cc to find out more details.
+Modbus master(0, mySerial, MODBUS_MODE_PIN);   //Last parameter 
 modbus_t telegram;
 float dynamometer = 0;
 
 //Actuator Variables
-float minTorque = 0.0;  // Minimum allowable torque
+float minTorque = -20.0;  // Minimum allowable torque
 float maxTorque = 20.0;  // Maximum allowable torque
 float setpointTorque = 0.0;
 float position;
@@ -31,12 +34,24 @@ float torque;
 float dynamicTorqueSensor;
 
 //Time Variables
-const long duration = 30; //in Sec
+const long duration = 10; //in Sec
 const long frecuency = 10; //in Hz
 unsigned long currentMillis;
 unsigned long previousMillisDuration;
 unsigned long previousMillisFrecuency;
 bool flag = false;
+
+float dynSensor()
+{
+  master.query(telegram); // send query (only once)
+  master.poll(); // check incoming messages
+  if (master.getState() == COM_IDLE) 
+  {
+    dynamometer = (uint16_t(au16data[0]) << 16) | uint16_t (au16data[1]);
+    return (dynamometer/10);
+  }
+  return (dynamometer/10);
+}
 
 #if eRobExp
 
@@ -53,7 +68,7 @@ void control()
   position = erob_1.getPosition();
   velocity = erob_1.getVelocity();
   torque = erob_1.getTorque();
-  dynamicTorqueSensor = dynSensor();  
+  dynamicTorqueSensor = dynSensor();
 
   /*Start of Control*/
   if (!erob_1.setTorque(setpointTorque, 2000))
@@ -87,7 +102,7 @@ enum OPTION : char
 
 State currentState = STATE_IDLE;
 
-#endif eRobExp
+#endif 
 
 void setup()
 {
@@ -115,9 +130,8 @@ void setup()
     Serial.println("MCP INITIALIZE SUCCEEDED");
   }
   delay(100);
-  #endif eRobExp
+  #endif 
 }
-
 
 void loop()
 {
@@ -287,17 +301,12 @@ void loop()
       break;
   }
 
-  #endif eRobExp
+  #endif 
 
   #if DynTest
-    master.query(telegram); // send query (only once)
-    master.poll(); // check incoming messages
-    if (master.getState() == COM_IDLE) 
-    {
-      dynamometer = (uint16_t(au16data[0]) << 16) | uint16_t (au16data[1]);
-      Serial.println(dynamometer/10);
-    }
-    delay(100);
-  #endif DynTest
+  dynamicTorqueSensor = dynSensor();
+  Serial.printf("Torquimetro= %f\n", dynamicTorqueSensor);
+  delay(100);
+  #endif 
 
 }
