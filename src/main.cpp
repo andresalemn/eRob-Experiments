@@ -34,12 +34,23 @@ float torque;
 float dynamicTorqueSensor;
 
 //Time Variables
-const long duration = 10; //in Sec
+const long duration = 120; //in Sec
 const long frecuency = 10; //in Hz
 unsigned long currentMillis;
 unsigned long previousMillisDuration;
 unsigned long previousMillisFrecuency;
 bool flag = false;
+
+//Testing variables
+float startRampValue = 0.0; // Initial value of the ramp
+float finalPeak = 10.0; // Final peak value
+float incrementStep = 2.0; // Increment step size
+float decrementStep = 0.5; // Decrement step size
+float rampValue = startRampValue; // Initialize ramp value
+float firstPeak = startRampValue; // Initialize firstPeak
+float updatedStartRampValue = startRampValue; // Initialize updatedStartRampValue
+int direction = 1; // 1 for increment, -1 for decrement
+
 
 float dynSensor()
 {
@@ -62,6 +73,33 @@ void (*interrupt_handlers[1])() =
     [](){ erob_1.handleInterrupt(); }
 };
 
+void  updateRampSignal()
+{
+  // Update ramp value based on direction
+  rampValue += direction * (direction == 1 ? incrementStep : decrementStep);
+
+  // Check if peak values are reached and change direction
+  if (rampValue >= firstPeak && direction == 1) {
+    direction = -1; // Start decrementing
+  } else if (rampValue <= updatedStartRampValue && direction == -1) {
+    updatedStartRampValue = rampValue; // Update startRampValue for the next cycle
+    direction = 1; // Start incrementing again
+    firstPeak += incrementStep; // Increase firstPeak by incrementStep
+
+    // Check if firstPeak has exceeded finalPeak
+    if (firstPeak >= finalPeak) {
+      firstPeak = finalPeak; // Set firstPeak to finalPeak
+    }
+  }
+
+  // Check if final peak is reached and stop
+  if (rampValue >= finalPeak) {
+    while (true) {
+      // Stop the loop
+    }
+  }
+}
+
 //Control Function
 void control()
 {
@@ -70,15 +108,22 @@ void control()
   torque = erob_1.getTorque();
   dynamicTorqueSensor = dynSensor();
 
-  /*Start of Control*/
+  /*Start of Control
   if (!erob_1.setTorque(setpointTorque, 2000))
   {
     Serial.println("ERROR: SET TORQUE FAILED");
   }
   /*End of Control*/
+
+  // Update the current ramp value based on the state
+  updateRampSignal();
+  // Output the current ramp value
+  Serial.printf("Setpoint= %f\n", rampValue); // Serial output
+  delay(100); // Introduce the delay
+
 }
 
-// Definition of States
+// Definition of States of the menu
 enum State 
 {
   STATE_IDLE,
@@ -86,7 +131,7 @@ enum State
   STATE_PROCESSING_INPUT
 };
 
-//Definition of FSM Options
+//Definition of Finite-state machine (FSM) Options
 enum OPTION : char
 {
   OPTION_SET_CONTROL_MODE = '0',
@@ -216,7 +261,7 @@ void loop()
             previousMillisFrecuency = currentMillis;
             control();
             //Serial.printf("Position= %f, Velocity= %f,  Torque= %f\n", position, velocity, torque);
-            Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);
+            //Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);
           }
         }
         flag = false;
