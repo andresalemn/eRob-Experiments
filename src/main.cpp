@@ -34,23 +34,35 @@ float torque;
 float dynamicTorqueSensor;
 
 //Time Variables
-const long duration = 120; //in Sec
+const long duration = 20; //in Sec
 const long frecuency = 10; //in Hz
+const long printingFrecuency = 100; //in ms
 unsigned long currentMillis;
 unsigned long previousMillisDuration;
 unsigned long previousMillisFrecuency;
+unsigned long previousMillisPrintingFrecuency;
 bool flag = false;
 
 //Testing variables
-float startRampValue = 0.0; // Initial value of the ramp
-float finalPeak = 10.0; // Final peak value
-float incrementStep = 2.0; // Increment step size
-float decrementStep = 0.5; // Decrement step size
-float rampValue = startRampValue; // Initialize ramp value
-float firstPeak = startRampValue; // Initialize firstPeak
-float updatedStartRampValue = startRampValue; // Initialize updatedStartRampValue
-int direction = 1; // 1 for increment, -1 for decrement
+//Ramp variables
+float startRampValue = 5.0; // Initial value of the ramp
+float finalRampValue = 15.0; // Final peak value
+float incrementRamp = 2.0; // Increment step size
+float decrementRamp = 1.0; // Decrement step size
+float currentRampValue; // Current value of the ramp
+bool isRamping = false; // State of the ramp function
+bool rampCompleted = false; // Flag to indicate if ramp is completed
+unsigned long previousRampMillis = 0; // Store the last time the ramp value was updated
+const unsigned long intervalRamp = 2000; // Interval between updates in milliseconds
 
+#if eRobExp
+
+//eRob Instance
+eRob erob_1(eRob::eRob_90, CAN_ID, CS, INT_PIN, SPI);
+void (*interrupt_handlers[1])() = 
+{
+    [](){ erob_1.handleInterrupt(); }
+};
 
 float dynSensor()
 {
@@ -64,41 +76,50 @@ float dynSensor()
   return (dynamometer/10);
 }
 
-#if eRobExp
+#if rampTest
+// Function to start the ramp
+void startRamp() {
+  isRamping = true;
+  rampCompleted = false;
+  currentRampValue = startRampValue; // Reset the current value
+  //Serial.println("Ramp function started.");
+}
 
-//eRob Instance
-eRob erob_1(eRob::eRob_90, CAN_ID, CS, INT_PIN, SPI);
-void (*interrupt_handlers[1])() = 
-{
-    [](){ erob_1.handleInterrupt(); }
-};
+// Function to run the ramp
+void runRamp() {
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousRampMillis >= intervalRamp) {
+    previousRampMillis = currentMillis;
 
-void  updateRampSignal()
-{
-  // Update ramp value based on direction
-  rampValue += direction * (direction == 1 ? incrementStep : decrementStep);
+    // Increment phase
+    currentRampValue += incrementRamp;
+    //Serial.println(currentRampValue); // Print value after increment
+    setpointTorque = currentRampValue;
 
-  // Check if peak values are reached and change direction
-  if (rampValue >= firstPeak && direction == 1) {
-    direction = -1; // Start decrementing
-  } else if (rampValue <= updatedStartRampValue && direction == -1) {
-    updatedStartRampValue = rampValue; // Update startRampValue for the next cycle
-    direction = 1; // Start incrementing again
-    firstPeak += incrementStep; // Increase firstPeak by incrementStep
+    // Decrement phase
+    currentRampValue -= decrementRamp;
+    //Serial.println(currentRampValue); // Print value after decrement
+    setpointTorque = currentRampValue;
 
-    // Check if firstPeak has exceeded finalPeak
-    if (firstPeak >= finalPeak) {
-      firstPeak = finalPeak; // Set firstPeak to finalPeak
+    // Check if final value reached and stop ramp if so
+    if (currentRampValue >= finalRampValue) {
+      currentRampValue = finalRampValue;
+      //Serial.println(currentRampValue); // Print final value
+      isRamping = false; // Stop the ramp function
+      rampCompleted = true; // Mark the ramp as completed
+      //Serial.println("Ramp function completed.");
     }
-  }
 
-  // Check if final peak is reached and stop
-  if (rampValue >= finalPeak) {
-    while (true) {
-      // Stop the loop
+    // Reset values if ramp is completed
+    if (rampCompleted) {
+      // Optionally reset any other state variables or perform cleanup here
+      isRamping = false;
+      rampCompleted = false;
     }
   }
 }
+#endif  
+
 
 //Control Function
 void control()
@@ -108,19 +129,35 @@ void control()
   torque = erob_1.getTorque();
   dynamicTorqueSensor = dynSensor();
 
-  /*Start of Control
+  #if normalTest
+  /*Start of Control*/
   if (!erob_1.setTorque(setpointTorque, 2000))
   {
     Serial.println("ERROR: SET TORQUE FAILED");
   }
   /*End of Control*/
+  #endif
 
-  // Update the current ramp value based on the state
-  updateRampSignal();
-  // Output the current ramp value
-  Serial.printf("Setpoint= %f\n", rampValue); // Serial output
-  delay(100); // Introduce the delay
+  #if rampTest
 
+    /*Start of Control*/
+    if (!erob_1.setTorque(setpointTorque, 2000))
+    {
+      Serial.println("ERROR: SET TORQUE FAILED");
+    }
+    /*End of Control*/
+
+    // Update the current ramp value based on the state
+    if (isRamping) {
+      runRamp();
+    }
+  #endif
+
+  #if setpointTest
+  /*Start of Control*/
+    
+  /*End of Control*/
+  #endif
 }
 
 // Definition of States of the menu
@@ -164,6 +201,8 @@ void setup()
   telegram.u16RegAdd = 0; // start address in slave // 0 -> Torque, 2 -> RPM
   telegram.u16CoilsNo = 2; // number of elements (coils or registers) to read
   telegram.au16reg = au16data; // pointer to a memory array in the Arduino
+
+  currentRampValue = startRampValue;
 
   #if eRobExp
   if (!erob_1.initialize())
@@ -249,6 +288,12 @@ void loop()
         
         previousMillisDuration = millis();
         previousMillisFrecuency = millis();
+        previousMillisPrintingFrecuency = millis();
+
+        #if rampTest
+          startRamp();
+        #endif
+
         while(digitalRead(CTRL_PIN) && !flag)
         {
           currentMillis = millis();
@@ -260,12 +305,33 @@ void loop()
           {
             previousMillisFrecuency = currentMillis;
             control();
-            //Serial.printf("Position= %f, Velocity= %f,  Torque= %f\n", position, velocity, torque);
-            //Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);
+          }
+
+          if (currentMillis - previousMillisPrintingFrecuency >= (printingFrecuency))
+          {
+            previousMillisPrintingFrecuency = currentMillis;
+            #if normalTest
+              //Serial.printf("Position= %f, Velocity= %f,  Torque= %f\n", position, velocity, torque);
+              Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);
+            #endif
+
+            #if rampTest
+              // Output the current ramp value
+              Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);
+            #endif  
+
+            #if setpointTest
+              #if DynTest
+                dynamicTorqueSensor = dynSensor();
+                Serial.printf("Torquimetro= %f\n", dynamicTorqueSensor);
+                delay(100);
+              #endif   
+            #endif
+
           }
         }
         flag = false;
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < 10; i++)    //After each control signal, torque 0 is commanded
         {
           if (!erob_1.setTorque(0.0, 2000))
           {
@@ -288,7 +354,7 @@ void loop()
           position = erob_1.getPosition();
           velocity = erob_1.getVelocity();
           torque = erob_1.getTorque();
-            Serial.printf("Setpoint= %f, Torque= %f\n", 0, torque);
+          Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);          
           delay(100);
         }
       }
@@ -346,12 +412,6 @@ void loop()
       break;
   }
 
-  #endif 
-
-  #if DynTest
-  dynamicTorqueSensor = dynSensor();
-  Serial.printf("Torquimetro= %f\n", dynamicTorqueSensor);
-  delay(100);
   #endif 
 
 }
