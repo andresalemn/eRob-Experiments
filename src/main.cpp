@@ -13,70 +13,43 @@ Finite State Machine (FSM) to implement control with a specific time and duratio
 #define INT_PIN 15
 #define CAN_ID 0x01
 #define CTRL_PIN 5
-#define RX2 16
-#define TX2 17
+#define PIN_RX2 16
+#define PIN_TX2 17
 #define MODBUS_MODE_PIN 13
 
-// data array for modbus network sharing
-uint16_t au16data[16];    //Max Lenght Buffer Array
-SoftwareSerial mySerial(RX2, TX2); //Create a SoftwareSerial object so that we can use software serial. Search "software serial" on Arduino.cc to find out more details.
-Modbus master(0, mySerial, MODBUS_MODE_PIN);   //Last parameter 
-modbus_t telegram;
-float dynamometer = 0;
+#if DynTest //Usar el dinamometro externo
+  // data array for modbus network sharing
+  uint16_t au16data[16];    //Max Lenght Buffer Array
+  SoftwareSerial mySerial(PIN_RX2, PIN_TX2); //Create a SoftwareSerial object so that we can use software serial. Search "software serial" on Arduino.cc to find out more details.
+  Modbus master(0, mySerial, MODBUS_MODE_PIN);   //Last parameter 
+  modbus_t telegram;
+  float dynamometer = 0;
 
-//Actuator Variables
-float minTorque = -20.0;  // Minimum allowable torque
-float maxTorque = 20.0;  // Maximum allowable torque
-float setpointTorque = 0.0;
-float position;
-float velocity;
-float torque;
-float dynamicTorqueSensor;
+  float dynSensor()
+  {
+    master.query(telegram); // send query (only once)
+    master.poll(); // check incoming messages
+    if (master.getState() == COM_IDLE) 
+    {
+      dynamometer = (uint16_t(au16data[0]) << 16) | uint16_t (au16data[1]);
+      return (dynamometer/10);
+    }
+    return (dynamometer/10);
+  }
 
-//Time Variables
-const long duration = 20; //in Sec
-const long frecuency = 10; //in Hz
-const long printingFrecuency = 100; //in ms
-unsigned long currentMillis;
-unsigned long previousMillisDuration;
-unsigned long previousMillisFrecuency;
-unsigned long previousMillisPrintingFrecuency;
-bool flag = false;
+#endif
 
-//Testing variables
-//Ramp variables
-float startRampValue = 5.0; // Initial value of the ramp
+#if rampTest //Ramp variables
+float startRampValue = 0.0; // Initial value of the ramp
 float finalRampValue = 15.0; // Final peak value
-float incrementRamp = 2.0; // Increment step size
-float decrementRamp = 1.0; // Decrement step size
+float incrementRamp = 0.1; // Increment step size
+float decrementRamp = 0.0; // Decrement step size
 float currentRampValue; // Current value of the ramp
 bool isRamping = false; // State of the ramp function
 bool rampCompleted = false; // Flag to indicate if ramp is completed
 unsigned long previousRampMillis = 0; // Store the last time the ramp value was updated
-const unsigned long intervalRamp = 2000; // Interval between updates in milliseconds
+const unsigned long intervalRamp = 150; // Interval between updates in milliseconds
 
-#if eRobExp
-
-//eRob Instance
-eRob erob_1(eRob::eRob_90, CAN_ID, CS, INT_PIN, SPI);
-void (*interrupt_handlers[1])() = 
-{
-    [](){ erob_1.handleInterrupt(); }
-};
-
-float dynSensor()
-{
-  master.query(telegram); // send query (only once)
-  master.poll(); // check incoming messages
-  if (master.getState() == COM_IDLE) 
-  {
-    dynamometer = (uint16_t(au16data[0]) << 16) | uint16_t (au16data[1]);
-    return (dynamometer/10);
-  }
-  return (dynamometer/10);
-}
-
-#if rampTest
 // Function to start the ramp
 void startRamp() {
   isRamping = true;
@@ -118,58 +91,77 @@ void runRamp() {
     }
   }
 }
-#endif  
 
+#endif
 
-//Control Function
-void control()
+#if eRobExp
+
+  //Actuator Variables
+  float minTorque = -20.0;  // Minimum allowable torque
+  float maxTorque = 20.0;  // Maximum allowable torque
+  float setpointTorque = 0.0;
+  float position;
+  float velocity;
+  float torque;
+  float dynamicTorqueSensor;
+
+  //Time Variables
+  const long duration = 10; //in Sec
+  const long frecuency = 10; //in Hz
+  const long printingFrecuency = 50; //in ms
+  unsigned long currentMillis;
+  unsigned long previousMillisDuration;
+  unsigned long previousMillisFrecuency;
+  unsigned long previousMillisPrintingFrecuency;
+  bool flag = false;
+
+  //eRob Instance
+  eRob erob_1(eRob::eRob_90, CAN_ID, CS, INT_PIN, SPI);
+  void (*interrupt_handlers[1])() = 
+  {
+      [](){ erob_1.handleInterrupt(); }
+  };
+
+#endif 
+
+void control() //Control Function
 {
   position = erob_1.getPosition();
   velocity = erob_1.getVelocity();
   torque = erob_1.getTorque();
+  #if DynTest //Usar el dinamometro externo
   dynamicTorqueSensor = dynSensor();
+  #endif
 
-  #if normalTest
   /*Start of Control*/
   if (!erob_1.setTorque(setpointTorque, 2000))
   {
     Serial.println("ERROR: SET TORQUE FAILED");
   }
   /*End of Control*/
+
+  #if normalTest
   #endif
 
   #if rampTest
-
-    /*Start of Control*/
-    if (!erob_1.setTorque(setpointTorque, 2000))
-    {
-      Serial.println("ERROR: SET TORQUE FAILED");
-    }
-    /*End of Control*/
-
     // Update the current ramp value based on the state
     if (isRamping) {
       runRamp();
     }
   #endif
 
-  #if setpointTest
-  /*Start of Control*/
-    
-  /*End of Control*/
+  #if positionTest
   #endif
 }
 
-// Definition of States of the menu
-enum State 
+enum State // Definition of States of the menu
 {
   STATE_IDLE,
   STATE_WAITING_INPUT,
   STATE_PROCESSING_INPUT
 };
 
-//Definition of Finite-state machine (FSM) Options
-enum OPTION : char
+enum OPTION : char //Definition of Finite-state machine (FSM) Options
 {
   OPTION_SET_CONTROL_MODE = '0',
   OPTION_TURN_ON = '1',
@@ -184,25 +176,27 @@ enum OPTION : char
 
 State currentState = STATE_IDLE;
 
-#endif 
-
 void setup()
 {
   Serial.begin(115200);
   SPI.begin();
   pinMode(CTRL_PIN, INPUT_PULLUP);
 
+  #if DynTest //Usar el dinamometro externo
   // Communication with the Virtual Torque Sensor
   mySerial.begin(19200);
   master.start();
-  master.setTimeOut( 200 ); // if there is no answer in 2000 ms, roll over
+  master.setTimeOut(200); // if there is no answer in 2000 ms, roll over
   telegram.u8id = 1; // slave address
   telegram.u8fct = 3; // function code (this one is registers read)
   telegram.u16RegAdd = 0; // start address in slave // 0 -> Torque, 2 -> RPM
   telegram.u16CoilsNo = 2; // number of elements (coils or registers) to read
   telegram.au16reg = au16data; // pointer to a memory array in the Arduino
+  #endif
 
+  #if rampTest
   currentRampValue = startRampValue;
+  #endif
 
   #if eRobExp
   if (!erob_1.initialize())
@@ -220,8 +214,8 @@ void setup()
 void loop()
 {
   #if eRobExp
-  // Handling the state machine
-  switch (currentState) 
+
+  switch (currentState)   // Handling the state machine
   {
     case STATE_IDLE:
       Serial.println("***--- MENU INBIODROID ---***");
@@ -306,7 +300,6 @@ void loop()
             previousMillisFrecuency = currentMillis;
             control();
           }
-
           if (currentMillis - previousMillisPrintingFrecuency >= (printingFrecuency))
           {
             previousMillisPrintingFrecuency = currentMillis;
@@ -320,12 +313,8 @@ void loop()
               Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);
             #endif  
 
-            #if setpointTest
-              #if DynTest
-                dynamicTorqueSensor = dynSensor();
-                Serial.printf("Torquimetro= %f\n", dynamicTorqueSensor);
-                delay(100);
-              #endif   
+            #if positionTest
+              Serial.printf("Setpoint= %f, Torque= %f, Position= %f\n", setpointTorque, torque, position);
             #endif
 
           }
@@ -345,18 +334,26 @@ void loop()
 
       else if (input == OPTION_SET_TORQUE_0)
       {
+        previousMillisPrintingFrecuency = millis();
+
         for (int i = 0; i < 100; i++)
         {
           if (!erob_1.setTorque(0.0, 2000))
           {
             Serial.println("ERROR: SET TORQUE 0 FAILED");
           }
+
           position = erob_1.getPosition();
           velocity = erob_1.getVelocity();
           torque = erob_1.getTorque();
-          Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);          
-          delay(100);
-        }
+
+          if (currentMillis - previousMillisPrintingFrecuency >= (printingFrecuency))
+          {
+              previousMillisPrintingFrecuency = currentMillis;
+              // Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);          
+              Serial.printf("Setpoint= %f, Torque= %f, Position= %f\n", setpointTorque, torque, position);
+          }
+        }        
       }
 
       else if (input == OPTION_HOME_POSITION)
@@ -411,7 +408,5 @@ void loop()
       currentState = STATE_IDLE;
       break;
   }
-
   #endif 
-
 }
