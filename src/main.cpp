@@ -100,6 +100,7 @@ void runRamp() {
   float minTorque = -20.0;  // Minimum allowable torque
   float maxTorque = 20.0;  // Maximum allowable torque
   float setpointTorque = 0.0;
+  float degPosition;
   float position;
   float velocity;
   float torque;
@@ -115,6 +116,15 @@ void runRamp() {
   unsigned long previousMillisPrintingFrecuency;
   bool flag = false;
 
+  // Return to Zero Mode
+  unsigned long currentZeroMillis;
+  float torqueToZero;
+  float targetZero = 0.0;
+  float Kp = 0.5; // Proportional gain, adjust as needed
+  float toleranceZero = 0.1; // Define a small tolerance for zero position
+  unsigned long previousZeroMillis = 0;
+  const long intervalZero = 50; // Check every 50 milliseconds
+
   //eRob Instance
   eRob erob_1(eRob::eRob_90, CAN_ID, CS, INT_PIN, SPI);
   void (*interrupt_handlers[1])() = 
@@ -127,23 +137,29 @@ void runRamp() {
 void control() //Control Function
 {
   position = erob_1.getPosition();
+  degPosition = position* (180.0 / PI);
   velocity = erob_1.getVelocity();
   torque = erob_1.getTorque();
   #if DynTest //Usar el dinamometro externo
   dynamicTorqueSensor = dynSensor();
   #endif
 
-  /*Start of Control*/
-  if (!erob_1.setTorque(setpointTorque, 2000))
-  {
-    Serial.println("ERROR: SET TORQUE FAILED");
-  }
-  /*End of Control*/
-
   #if normalTest
+    /*Start of Control*/
+    if (!erob_1.setTorque(setpointTorque, 2000))
+    {
+      Serial.println("ERROR: SET TORQUE FAILED");
+    }
+    /*End of Control*/
   #endif
 
   #if rampTest
+    /*Start of Control*/
+    if (!erob_1.setTorque(setpointTorque, 2000))
+    {
+      Serial.println("ERROR: SET TORQUE FAILED");
+    }
+    /*End of Control*/
     // Update the current ramp value based on the state
     if (isRamping) {
       runRamp();
@@ -151,7 +167,42 @@ void control() //Control Function
   #endif
 
   #if positionTest
+    /*Start of Control*/
+    if (!erob_1.setTorque(setpointTorque, 2000))
+    {
+      Serial.println("ERROR: SET TORQUE FAILED");
+    }
+    /*End of Control*/
   #endif
+}
+
+void goToZero()
+{  
+  currentZeroMillis = millis();
+
+  if (currentZeroMillis - previousZeroMillis >= intervalZero) {
+    previousZeroMillis = currentZeroMillis;
+    
+    // Get the current position
+    position = erob_1.getPosition();
+    degPosition = position* (180.0 / PI);
+    
+    // Check if we are within the tolerance range
+    if (abs(degPosition) > toleranceZero) {
+
+      // Calculate the error
+      float error = targetZero - position; // Target is 0, so error is -position
+      
+      // Calculate the torque using the P controller
+      torqueToZero = Kp * error;
+        
+      // Apply torque to the motor
+      if (!erob_1.setTorque(torqueToZero, 2000))
+      {
+        Serial.println("ERROR: SET TORQUE FAILED");
+      }
+    }
+  }
 }
 
 enum State // Definition of States of the menu
@@ -170,8 +221,8 @@ enum OPTION : char //Definition of Finite-state machine (FSM) Options
   OPTION_SET_TORQUE_0 = '4',
   OPTION_HOME_POSITION = '5',
   OPTION_MOTOR_RESPONSE = '6',
-  OPTION_CHANGE_SETPOINT = '7'  
-  
+  OPTION_CHANGE_SETPOINT = '7',  
+  OPTION_GO_ZERO = '8' 
 };
 
 State currentState = STATE_IDLE;
@@ -227,6 +278,7 @@ void loop()
       Serial.print("Home Position: "); Serial.println(OPTION_HOME_POSITION - '0');
       Serial.print("Motor Response: "); Serial.println(OPTION_MOTOR_RESPONSE - '0');
       Serial.print("Change Setpoint: "); Serial.println(OPTION_CHANGE_SETPOINT - '0');
+      Serial.print("Go to zero: "); Serial.println(OPTION_GO_ZERO - '0');
       Serial.println();
       currentState = STATE_WAITING_INPUT;
       break;
@@ -314,9 +366,8 @@ void loop()
             #endif  
 
             #if positionTest
-              Serial.printf("Setpoint= %f, Torque= %f, Position= %f\n", setpointTorque, torque, position);
+              Serial.printf("Setpoint= %f, Torque= %f, Position= %f\n", setpointTorque, torque, degPosition);
             #endif
-
           }
         }
         flag = false;
@@ -344,14 +395,20 @@ void loop()
           }
 
           position = erob_1.getPosition();
+          degPosition = position* (180.0 / PI);
           velocity = erob_1.getVelocity();
           torque = erob_1.getTorque();
 
           if (currentMillis - previousMillisPrintingFrecuency >= (printingFrecuency))
           {
               previousMillisPrintingFrecuency = currentMillis;
-              // Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);          
-              Serial.printf("Setpoint= %f, Torque= %f, Position= %f\n", setpointTorque, torque, position);
+              #if normalTest
+                Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);          
+              #endif
+
+              #if positionTest
+              Serial.printf("Setpoint= %f, Torque= %f, Position= %f\n", setpointTorque, torque, degPosition);
+              #endif
           }
         }        
       }
@@ -399,6 +456,51 @@ void loop()
             }
           }
         }
+      }
+
+      else if (input == OPTION_GO_ZERO)
+      {
+        Serial.println("Regresando a Cero");
+        
+        previousMillisDuration = millis();
+        previousMillisFrecuency = millis();
+        previousMillisPrintingFrecuency = millis();
+
+        while(digitalRead(CTRL_PIN) && !flag)
+        {
+          currentMillis = millis();
+          if (currentMillis - previousMillisDuration >= (duration * 1000))
+          {
+            flag = true;
+          }
+          if (currentMillis - previousMillisFrecuency >= (1000.0/frecuency))
+          {
+            previousMillisFrecuency = currentMillis;
+            goToZero();
+          }
+          if (currentMillis - previousMillisPrintingFrecuency >= (printingFrecuency))
+          {
+            previousMillisPrintingFrecuency = currentMillis;
+            #if normalTest
+              //Serial.printf("Position= %f, Velocity= %f,  Torque= %f\n", position, velocity, torque);
+              Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);
+            #endif
+
+            #if positionTest
+              Serial.printf("Setpoint= %f, Torque= %f, Position= %f\n", setpointTorque, torque, degPosition);
+            #endif
+          }
+        }
+        flag = false;
+        for (int i = 0; i < 10; i++)    //After each control signal, torque 0 is commanded
+        {
+          if (!erob_1.setTorque(0.0, 2000))
+          {
+            Serial.println("ERROR: SET TORQUE 0 FAILED");
+          }
+          delay(100);
+        }        
+        Serial.println("Zero Reached!!");
       }
 
       else
