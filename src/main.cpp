@@ -97,19 +97,20 @@ void runRamp() {
 #if eRobExp
 
   //Actuator Variables
-  float minTorque = -20.0;  // Minimum allowable torque
-  float maxTorque = 20.0;  // Maximum allowable torque
-  float setpointTorque = 0.0;
-  float degPosition;
   float position;
+  float degPosition;
   float velocity;
+  float degVelocity;
   float torque;
+  float minTorque = -7.0;  // Minimum allowable torque
+  float maxTorque = 7.0;  // Maximum allowable torque
+  float setpointTorque = 5.0;
   float dynamicTorqueSensor;
 
   //Time Variables
-  const long duration = 10; //in Sec
+  const long duration = 30; //in Sec
   const long frecuency = 10; //in Hz
-  const long printingFrecuency = 50; //in ms
+  const long printingFrecuency = 100; //in ms
   unsigned long currentMillis;
   unsigned long previousMillisDuration;
   unsigned long previousMillisFrecuency;
@@ -117,11 +118,14 @@ void runRamp() {
   bool flag = false;
 
   // Return to Zero Mode
-  unsigned long currentZeroMillis;
-  float torqueToZero;
+  float posError;
+  float derivativeError;
+  float previousError = 0; // Store the previous error
   float targetZero = 0.0;
-  float Kp = 0.5; // Proportional gain, adjust as needed
-  float toleranceZero = 0.1; // Define a small tolerance for zero position
+  float Kp = 15.0; // Proportional gain, adjust as needed
+  float Kd = 10.0; // Derivative gain, adjust as needed
+  float toleranceZero = 0.5; // Define a small tolerance for zero position
+  unsigned long currentZeroMillis;
   unsigned long previousZeroMillis = 0;
   const long intervalZero = 50; // Check every 50 milliseconds
 
@@ -134,14 +138,27 @@ void runRamp() {
 
 #endif 
 
-void control() //Control Function
+void getData()
 {
   position = erob_1.getPosition();
   degPosition = position* (180.0 / PI);
   velocity = erob_1.getVelocity();
+  degVelocity = velocity* (180.0 / PI);
   torque = erob_1.getTorque();
+}
+
+void control() //Control Function
+{
+  getData();
+
   #if DynTest //Usar el dinamometro externo
   dynamicTorqueSensor = dynSensor();
+  /*Start of Control*/
+  if (!erob_1.setTorque(setpointTorque, 2000))
+  {
+    Serial.println("ERROR: SET TORQUE FAILED");
+  }
+  /*End of Control*/
   #endif
 
   #if normalTest
@@ -176,33 +193,63 @@ void control() //Control Function
   #endif
 }
 
-void goToZero()
-{  
-  currentZeroMillis = millis();
+void goToZero() {  
+    unsigned long currentZeroMillis = millis();
 
-  if (currentZeroMillis - previousZeroMillis >= intervalZero) {
-    previousZeroMillis = currentZeroMillis;
-    
-    // Get the current position
-    position = erob_1.getPosition();
-    degPosition = position* (180.0 / PI);
-    
-    // Check if we are within the tolerance range
-    if (abs(degPosition) > toleranceZero) {
+    getData();
 
-      // Calculate the error
-      float error = targetZero - position; // Target is 0, so error is -position
-      
-      // Calculate the torque using the P controller
-      torqueToZero = Kp * error;
+    if (currentZeroMillis - previousZeroMillis >= intervalZero) {
+        previousZeroMillis = currentZeroMillis;
         
-      // Apply torque to the motor
-      if (!erob_1.setTorque(torqueToZero, 2000))
-      {
-        Serial.println("ERROR: SET TORQUE FAILED");
-      }
+        // Get the current position
+        position = erob_1.getPosition();
+        degPosition = position * (180.0 / PI);
+        
+        // Check if we are within the tolerance range
+        if (abs(degPosition) > toleranceZero) {
+            // Calculate the error
+            posError = targetZero - position; // Target is 0, so error is -position
+
+            // Calculate the derivative of the error
+            derivativeError = (posError - previousError) / intervalZero;
+
+            // Calculate the torque using the PD controller
+            setpointTorque = Kp * posError + Kd * derivativeError;
+            
+            // Apply torque limits
+            if (setpointTorque > maxTorque) {
+                setpointTorque = maxTorque;
+            } else if (setpointTorque < minTorque) {
+                setpointTorque = minTorque;
+            }
+
+            // Apply torque to the motor
+            if (!erob_1.setTorque(setpointTorque, 2000)) {
+                Serial.println("ERROR: SET TORQUE FAILED");
+            }
+        }
     }
-  }
+}
+
+void printData()
+{
+  #if normalTest
+    //Serial.printf("Position= %f, Velocity= %f,  Torque= %f\n", position, velocity, torque);
+    Serial.printf("Setpoint= %f, Torque= %f, Position= %f, Velocidad= %f\n", setpointTorque, torque, degPosition, degVelocity);
+  #endif
+
+  #if DynTest //Usar el dinamometro externo
+    Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);
+  #endif
+
+  #if rampTest
+    // Output the current ramp value
+    Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);
+  #endif  
+
+  #if positionTest
+    Serial.printf("Setpoint= %f, Torque= %f, Position= %f\n", setpointTorque, torque, degPosition);
+  #endif
 }
 
 enum State // Definition of States of the menu
@@ -355,19 +402,7 @@ void loop()
           if (currentMillis - previousMillisPrintingFrecuency >= (printingFrecuency))
           {
             previousMillisPrintingFrecuency = currentMillis;
-            #if normalTest
-              //Serial.printf("Position= %f, Velocity= %f,  Torque= %f\n", position, velocity, torque);
-              Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);
-            #endif
-
-            #if rampTest
-              // Output the current ramp value
-              Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);
-            #endif  
-
-            #if positionTest
-              Serial.printf("Setpoint= %f, Torque= %f, Position= %f\n", setpointTorque, torque, degPosition);
-            #endif
+            printData();
           }
         }
         flag = false;
@@ -386,35 +421,29 @@ void loop()
       else if (input == OPTION_SET_TORQUE_0)
       {
         previousMillisPrintingFrecuency = millis();
-
+        setpointTorque = 0.0;
         for (int i = 0; i < 100; i++)
         {
-          if (!erob_1.setTorque(0.0, 2000))
+          if (!erob_1.setTorque(setpointTorque, 2000))
           {
             Serial.println("ERROR: SET TORQUE 0 FAILED");
           }
 
-          position = erob_1.getPosition();
-          degPosition = position* (180.0 / PI);
-          velocity = erob_1.getVelocity();
-          torque = erob_1.getTorque();
+          getData();
 
           if (currentMillis - previousMillisPrintingFrecuency >= (printingFrecuency))
           {
-              previousMillisPrintingFrecuency = currentMillis;
-              #if normalTest
-                Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);          
-              #endif
-
-              #if positionTest
-              Serial.printf("Setpoint= %f, Torque= %f, Position= %f\n", setpointTorque, torque, degPosition);
-              #endif
+            previousMillisPrintingFrecuency = currentMillis;
+            printData();
           }
         }        
       }
 
       else if (input == OPTION_HOME_POSITION)
       {
+
+        Serial.println("ERROR: SET HOME IS NOT AVAILABLE RIGHT NOW");
+        /*
         if (!erob_1.setCurrentPositionAsZero())
         {
           Serial.println("ERROR: SET CURRENT POSITION AS ZERO FAILED");
@@ -423,6 +452,7 @@ void loop()
         {
           Serial.println("SET CURRENT POSITION AS ZERO SUCCEEDED");
         }
+        */
       }
 
       else if (input == OPTION_MOTOR_RESPONSE)
@@ -450,8 +480,7 @@ void loop()
             } else if (setpointTorque < minTorque || setpointTorque > maxTorque) {
                 Serial.println("The value must be between " + String(minTorque) + " and " + String(maxTorque) + ". Please try again.");
             } else {
-                Serial.print("\nYou have set the torque to: ");
-                Serial.println(setpointTorque);
+                Serial.printf("\nYou have set the torque to: %f\n", setpointTorque);
                 break; // Exit the loop on successful input
             }
           }
@@ -481,14 +510,7 @@ void loop()
           if (currentMillis - previousMillisPrintingFrecuency >= (printingFrecuency))
           {
             previousMillisPrintingFrecuency = currentMillis;
-            #if normalTest
-              //Serial.printf("Position= %f, Velocity= %f,  Torque= %f\n", position, velocity, torque);
-              Serial.printf("Setpoint= %f, Torque= %f, Torquimetro= %f\n", setpointTorque, torque, dynamicTorqueSensor);
-            #endif
-
-            #if positionTest
-              Serial.printf("Setpoint= %f, Torque= %f, Position= %f\n", setpointTorque, torque, degPosition);
-            #endif
+            printData();
           }
         }
         flag = false;
