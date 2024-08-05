@@ -41,7 +41,8 @@ Finite State Machine (FSM) to implement control with a specific time and duratio
   bool flag = false;
 
   /* Control Variables*/
-
+  byte cmd = 0;  // Un byte que utilizamos para la comunicación serie (cmd=comando)
+  
   // Define the boolean variable and a previous state variable
   bool currentStateKd = false;
   bool previousStateKd = false;
@@ -59,8 +60,8 @@ Finite State Machine (FSM) to implement control with a specific time and duratio
   float derivativeError;
   float previousError = 0; // Store the previous error
   float targetZero = 0.0;
-  float Kp = 15.0; // Proportional gain, adjust as needed
-  float Kd = 10.0; // Derivative gain, adjust as needed
+  float Kp = 10.0; // Proportional gain, adjust as needed
+  float Kd = 5.0; // Derivative gain, adjust as needed
   float toleranceZero = 0.5; // Define a small tolerance for zero position
   unsigned long currentZeroMillis;
   unsigned long previousZeroMillis = 0;
@@ -161,7 +162,6 @@ void IRAM_ATTR toggleBoolean() {
   }
 }
 
-
 void updateKd() // Function to update the kd condition
 {
   // Get the current time
@@ -221,14 +221,18 @@ void updateKd() // Function to update the kd condition
     #if buttonTest
       if (currentStateKd == true)
       {
-        // Control sin kd
+        setpointTorque = 0.0;
       } 
 
-      else if (currentStateKd == false)
+      if (currentStateKd == false)
       {
-        // Control con kd
-      }
+        setpointTorque = 4.0;
+      } 
 
+      if (!erob_1.setTorque(setpointTorque, 2000))
+      {
+        Serial.println("ERROR: SET TORQUE FAILED");
+      }
     #endif
 
     #if rampTest
@@ -313,7 +317,36 @@ void updateKd() // Function to update the kd condition
     #if positionTest
       Serial.printf("Setpoint= %f, Torque= %f, Position= %f\n", setpointTorque, torque, degPosition);
     #endif
+
+    #if buttonTest
+      Serial.printf("Setpoint= %f, Torque= %f, Position= %f, Velocidad= %f\n", setpointTorque, torque, degPosition, degVelocity);
+    #endif
+
   }
+
+void printChange(byte flag){  // Imprime en el terminal serie los datos después de un cambio de variable. 
+                          
+  if (flag == 1) // setpointTorque changed
+  {
+    Serial.printf("\nYou have set the torque to: %f\n", setpointTorque);
+  }
+
+  if (flag == 2) // kP changed
+  {
+    Serial.printf("\nYou have set the Proportional Gain to: %f\n", Kp);
+  }
+  
+  if (flag == 3) // kD changed
+  {
+    Serial.printf("\nYou have set the Derivative Gain to: %f\n", Kd);
+  }
+    
+  if (flag == 4) // Showing the current variables
+  {
+    Serial.println("\nThe current values are:");
+    Serial.printf("Setpoint= %f, kP= %f, kD= %f\n", setpointTorque, Kp, Kd);
+  }
+}
 
   enum State // Definition of States of the menu
   {
@@ -331,7 +364,7 @@ void updateKd() // Function to update the kd condition
     OPTION_SET_TORQUE_0 = '4',
     OPTION_HOME_POSITION = '5',
     OPTION_MOTOR_RESPONSE = '6',
-    OPTION_CHANGE_SETPOINT = '7',  
+    OPTION_CHANGE_VALUES = '7',  
     OPTION_GO_ZERO = '8' 
   };
 
@@ -376,6 +409,9 @@ void setup()
   }
   delay(100);
   #endif 
+
+  printChange(4); // Prints the variables of interest current values
+  
 }
 
 void loop()
@@ -393,7 +429,7 @@ void loop()
       Serial.print("Set Torque 0: "); Serial.println(OPTION_SET_TORQUE_0 - '0');
       Serial.print("Home Position: "); Serial.println(OPTION_HOME_POSITION - '0');
       Serial.print("Motor Response: "); Serial.println(OPTION_MOTOR_RESPONSE - '0');
-      Serial.print("Change Setpoint: "); Serial.println(OPTION_CHANGE_SETPOINT - '0');
+      Serial.print("Change Values: "); Serial.println(OPTION_CHANGE_VALUES - '0');
       Serial.print("Go to zero: "); Serial.println(OPTION_GO_ZERO - '0');
       Serial.println();
       currentState = STATE_WAITING_INPUT;
@@ -446,8 +482,7 @@ void loop()
 
       else if (input == OPTION_SET_CONTROL)
       {
-        Serial.println("Inicio de Test");
-        
+        Serial.println("Inicio de Test");        
         previousMillisDuration = millis();
         previousMillisFrecuency = millis();
         previousMillisPrintingFrecuency = millis();
@@ -458,12 +493,11 @@ void loop()
 
         while(digitalRead(CTRL_PIN) && !flag)
         {
-          currentMillis = millis();
-
           #if buttonTest
           updateKd();
           #endif
 
+          currentMillis = millis();
           if (currentMillis - previousMillisDuration >= (duration * 1000))
           {
             flag = true;
@@ -480,6 +514,11 @@ void loop()
           }
         }
         flag = false;
+
+        #if buttonTest
+          currentStateKd = false;
+        #endif
+
         for (int i = 0; i < 10; i++)    //After each control signal, torque 0 is commanded
         {
           if (!erob_1.setTorque(0.0, 2000))
@@ -537,28 +576,62 @@ void loop()
           }
       }
 
-      else if (input == OPTION_CHANGE_SETPOINT)
-      {
-        Serial.printf("Please enter a torque value (%f - %f)", minTorque, maxTorque);
-        while (true) {
-          // Check if data is available to read
+      else if (input == OPTION_CHANGE_VALUES)
+      {     
+        bool inputReceived = false;
+        Serial.println("Press the correct character followed by the new value.");
+        Serial.println("| T for Torque | P for kP | D for kD | K for exit |");
+        Serial.println("For example: 'T5' sets the setpointTorque variable to 5");
+        Serial.printf("Remember the torque limits (%f - %f)\n", minTorque, maxTorque);        
+        Serial.println("The letter K will only print the current values without changing any of them");
+        Serial.println("\nWaiting for command...");
+
+        while (!inputReceived) {
           if (Serial.available() > 0) {
-            String input = Serial.readStringUntil('\n'); // Read the input as a string
-            input.trim(); // Remove any leading/trailing whitespace
-
-            setpointTorque = input.toFloat();
-
-            // Check if the input is valid and within range
-            if (input == "" || (setpointTorque == 0.0 && input != "0" && input != "0.0")) {
-                Serial.println("\nInvalid input. Please enter a valid number.");
-            } else if (setpointTorque < minTorque || setpointTorque > maxTorque) {
-                Serial.println("The value must be between " + String(minTorque) + " and " + String(maxTorque) + ". Please try again.");
-            } else {
-                Serial.printf("\nYou have set the torque to: %f\n", setpointTorque);
-                break; // Exit the loop on successful input
+            cmd = Serial.read();
+            if (cmd > 31) {
+              if (cmd > 'Z') cmd -= 32;  // Convert to uppercase if necessary
+              byte flags = 0;
+              switch (cmd) {
+                case 'T':
+                  if (Serial.available() > 0) {
+                    float tempTorque = Serial.parseFloat();
+                    if (tempTorque < minTorque) {
+                      setpointTorque = minTorque;
+                      Serial.printf("Torque too low. Setting to minimum: %f\n", minTorque);
+                    } else if (tempTorque > maxTorque) {
+                      setpointTorque = maxTorque;
+                      Serial.printf("Torque too high. Setting to maximum: %f\n", maxTorque);
+                    } else {
+                      setpointTorque = tempTorque;
+                    }
+                    flags = 1;
+                  }
+                  break;
+                case 'P':
+                  if (Serial.available() > 0) {
+                    Kp = Serial.parseFloat();
+                    flags = 2;
+                  }
+                  break;
+                case 'D':
+                  if (Serial.available() > 0) {
+                    Kd = Serial.parseFloat();
+                    flags = 3;
+                  }
+                  break;
+                case 'K':
+                  flags = 4;
+                  break;
+                default:
+                  Serial.println("Invalid command. Please enter 'T', 'P', 'D', or 'K'.");
+                  continue;
+              }
+              printChange(flags);
+              inputReceived = true;  // Exit the loop after processing input
             }
           }
-        }
+        }      
       }
 
       else if (input == OPTION_GO_ZERO)
