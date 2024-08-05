@@ -31,7 +31,7 @@ Finite State Machine (FSM) to implement control with a specific time and duratio
   float dynamicTorqueSensor;
 
   //Time Variables
-  const long duration = 30; //in Sec
+  float duration = 10; //in Sec
   const long frecuency = 10; //in Hz
   const long printingFrecuency = 100; //in ms
   unsigned long currentMillis;
@@ -152,39 +152,39 @@ void runRamp() {
       [](){ erob_1.handleInterrupt(); }
   };
  
-void IRAM_ATTR toggleBoolean() {
-  currentMillisKd = millis();
-  
-  // Check if the time since the last interrupt is greater than the debounce delay
-  if ((currentMillisKd - lastDebounceTimeKd) > debounceDelayKd) {
-    currentStateKd = !currentStateKd;
-    lastDebounceTimeKd = currentMillisKd;
-  }
-}
-
-void updateKd() // Function to update the kd condition
-{
-  // Get the current time
-  currentMillisKd = millis();
-
-  // Check if the interval has passed
-  if (currentMillisKd - previousMillisKd >= intervalKd) {
-    // Update the previousMillisKd to the current time
-    previousMillisKd = currentMillisKd;
-
-    // Check if the state has changed
-    if (currentStateKd != previousStateKd) {
-      // Print different messages based on the state
-      if (currentStateKd) {
-        Serial.println("The boolean variable has changed to true!");
-      } else {
-        Serial.println("The boolean variable has changed to false!");
-      }
-      // Update the previous state to the current state
-      previousStateKd = currentStateKd;
+  void IRAM_ATTR toggleBoolean() {
+    currentMillisKd = millis();
+    
+    // Check if the time since the last interrupt is greater than the debounce delay
+    if ((currentMillisKd - lastDebounceTimeKd) > debounceDelayKd) {
+      currentStateKd = !currentStateKd;
+      lastDebounceTimeKd = currentMillisKd;
     }
   }
-}
+
+  void updateKd() // Function to update the kd condition
+  {
+    // Get the current time
+    currentMillisKd = millis();
+
+    // Check if the interval has passed
+    if (currentMillisKd - previousMillisKd >= intervalKd) {
+      // Update the previousMillisKd to the current time
+      previousMillisKd = currentMillisKd;
+
+      // Check if the state has changed
+      if (currentStateKd != previousStateKd) {
+        // Print different messages based on the state
+        if (currentStateKd) {
+          Serial.println("The boolean variable has changed to true!");
+        } else {
+          Serial.println("The boolean variable has changed to false!");
+        }
+        // Update the previous state to the current state
+        previousStateKd = currentStateKd;
+      }
+    }
+  }
 
   void getData()  // Function to obtain the actual values of position, velocity and torque
   {
@@ -221,12 +221,12 @@ void updateKd() // Function to update the kd condition
     #if buttonTest
       if (currentStateKd == true)
       {
-        setpointTorque = 0.0;
+        setpointTorque = (-Kd)*velocity;
       } 
 
       if (currentStateKd == false)
       {
-        setpointTorque = 4.0;
+        setpointTorque = 15.0;
       } 
 
       if (!erob_1.setTorque(setpointTorque, 2000))
@@ -260,41 +260,41 @@ void updateKd() // Function to update the kd condition
 
   void goToZero() // Function that returns the shaft to its HOME (0°)
   {  
-      unsigned long currentZeroMillis = millis();
+    unsigned long currentZeroMillis = millis();
 
-      getData();
+    getData();
 
-      if (currentZeroMillis - previousZeroMillis >= intervalZero) {
-          previousZeroMillis = currentZeroMillis;
-          
-          // Get the current position
-          position = erob_1.getPosition();
-          degPosition = position * (180.0 / PI);
-          
-          // Check if we are within the tolerance range
-          if (abs(degPosition) > toleranceZero) {
-              // Calculate the error
-              posError = targetZero - position; // Target is 0, so error is -position
+    if (currentZeroMillis - previousZeroMillis >= intervalZero) {
+        previousZeroMillis = currentZeroMillis;
+        
+        // Get the current position
+        position = erob_1.getPosition();
+        degPosition = position * (180.0 / PI);
+        
+        // Check if we are within the tolerance range
+        if (abs(degPosition) > toleranceZero) {
+            // Calculate the error
+            posError = targetZero - position; // Target is 0, so error is -position
 
-              // Calculate the derivative of the error
-              derivativeError = (posError - previousError) / intervalZero;
+            // Calculate the derivative of the error
+            derivativeError = (posError - previousError) / intervalZero;
 
-              // Calculate the torque using the PD controller
-              setpointTorque = Kp * posError + Kd * derivativeError;
-              
-              // Apply torque limits
-              if (setpointTorque > maxTorque) {
-                  setpointTorque = maxTorque;
-              } else if (setpointTorque < minTorque) {
-                  setpointTorque = minTorque;
-              }
+            // Calculate the torque using the PD controller
+            setpointTorque = Kp * posError + Kd * derivativeError;
+            
+            // Apply torque limits
+            if (setpointTorque > maxTorque) {
+                setpointTorque = maxTorque;
+            } else if (setpointTorque < minTorque) {
+                setpointTorque = minTorque;
+            }
 
-              // Apply torque to the motor
-              if (!erob_1.setTorque(setpointTorque, 2000)) {
-                  Serial.println("ERROR: SET TORQUE FAILED");
-              }
-          }
-      }
+            // Apply torque to the motor
+            if (!erob_1.setTorque(setpointTorque, 2000)) {
+                Serial.println("ERROR: SET TORQUE FAILED");
+            }
+        }
+    }
   }
 
   void printData()  // Function to print the data to the serial monitor depending on the testing mode
@@ -321,32 +321,36 @@ void updateKd() // Function to update the kd condition
     #if buttonTest
       Serial.printf("Setpoint= %f, Torque= %f, Position= %f, Velocidad= %f\n", setpointTorque, torque, degPosition, degVelocity);
     #endif
-
   }
 
-void printChange(byte flag){  // Imprime en el terminal serie los datos después de un cambio de variable. 
-                          
-  if (flag == 1) // setpointTorque changed
-  {
-    Serial.printf("\nYou have set the torque to: %f\n", setpointTorque);
-  }
+  void printChange(byte flag){  // Imprime en el terminal serie los datos después de un cambio de variable. 
+                            
+    if (flag == 1) // setpointTorque changed
+    {
+      Serial.printf("\nYou have set the torque (Setpoint) to: %f N·m\n", setpointTorque);
+    }
 
-  if (flag == 2) // kP changed
-  {
-    Serial.printf("\nYou have set the Proportional Gain to: %f\n", Kp);
-  }
-  
-  if (flag == 3) // kD changed
-  {
-    Serial.printf("\nYou have set the Derivative Gain to: %f\n", Kd);
-  }
+    if (flag == 2) // kP changed
+    {
+      Serial.printf("\nYou have set the Proportional Gain (Kp) to: %f\n", Kp);
+    }
     
-  if (flag == 4) // Showing the current variables
-  {
-    Serial.println("\nThe current values are:");
-    Serial.printf("Setpoint= %f, kP= %f, kD= %f\n", setpointTorque, Kp, Kd);
+    if (flag == 3) // kD changed
+    {
+      Serial.printf("\nYou have set the Derivative Gain (Kd) to: %f\n", Kd);
+    }
+    
+    if (flag == 4) // Seconds changed
+    {
+      Serial.printf("\nYou have set the duration of the experiment to: %f seconds\n", duration);
+    }
+
+    if (flag == 5) // Showing the current variables
+    {
+      Serial.println("\nThe current values are:");
+      Serial.printf("Setpoint= %f, kP= %f, kD= %f, Duration= %f\n", setpointTorque, Kp, Kd, duration);
+    }
   }
-}
 
   enum State // Definition of States of the menu
   {
@@ -410,7 +414,7 @@ void setup()
   delay(100);
   #endif 
 
-  printChange(4); // Prints the variables of interest current values
+  printChange(5); // Prints the variables of interest current values
   
 }
 
@@ -580,10 +584,11 @@ void loop()
       {     
         bool inputReceived = false;
         Serial.println("Press the correct character followed by the new value.");
-        Serial.println("| T for Torque | P for kP | D for kD | K for exit |");
-        Serial.println("For example: 'T5' sets the setpointTorque variable to 5");
-        Serial.printf("Remember the torque limits (%f - %f)\n", minTorque, maxTorque);        
-        Serial.println("The letter K will only print the current values without changing any of them");
+        Serial.println("| T for Torque | P for kP | D for kD | S for Seconds | E for exit |");
+        Serial.println("- For example: 'T5' sets the setpointTorque variable to 5");
+        Serial.printf("- Remember the torque limits [%f  %f]\n", minTorque, maxTorque);        
+        Serial.println("- The letter E will only print the current values without changing any of them");
+        printChange(5); // Prints the variables of interest current values
         Serial.println("\nWaiting for command...");
 
         while (!inputReceived) {
@@ -620,11 +625,17 @@ void loop()
                     flags = 3;
                   }
                   break;
-                case 'K':
-                  flags = 4;
+                case 'S':
+                  if (Serial.available() > 0) {
+                    duration = Serial.parseFloat();
+                    flags = 4;
+                  }
+                  break;                
+                case 'E':
+                  flags = 5;
                   break;
                 default:
-                  Serial.println("Invalid command. Please enter 'T', 'P', 'D', or 'K'.");
+                  Serial.println("Invalid command. Please enter 'T', 'P', 'D', 'S', or 'E'.");
                   continue;
               }
               printChange(flags);
