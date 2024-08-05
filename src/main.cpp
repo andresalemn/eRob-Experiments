@@ -40,8 +40,19 @@ Finite State Machine (FSM) to implement control with a specific time and duratio
   unsigned long previousMillisPrintingFrecuency;
   bool flag = false;
 
-  // GPIO pin to configure the interrupt
-  volatile bool has_interrupted = false;
+  /* Control Variables*/
+
+  // Define the boolean variable and a previous state variable
+  bool currentStateKd = false;
+  bool previousStateKd = false;
+
+  // Define variables for debouncing
+  volatile unsigned long lastDebounceTimeKd = 0;
+  const unsigned long debounceDelayKd = 1000; // 1000 milliseconds debounce delay
+
+  unsigned long previousMillisKd = 0;
+  unsigned long currentMillisKd;
+  const long intervalKd = 100; // Adjust the interval as needed
 
   // Return to Zero Mode
   float posError;
@@ -140,8 +151,39 @@ void runRamp() {
       [](){ erob_1.handleInterrupt(); }
   };
  
-void IRAM_ATTR myInterruptFunction() {
-  has_interrupted = true;
+void IRAM_ATTR toggleBoolean() {
+  currentMillisKd = millis();
+  
+  // Check if the time since the last interrupt is greater than the debounce delay
+  if ((currentMillisKd - lastDebounceTimeKd) > debounceDelayKd) {
+    currentStateKd = !currentStateKd;
+    lastDebounceTimeKd = currentMillisKd;
+  }
+}
+
+
+void updateKd() // Function to update the kd condition
+{
+  // Get the current time
+  currentMillisKd = millis();
+
+  // Check if the interval has passed
+  if (currentMillisKd - previousMillisKd >= intervalKd) {
+    // Update the previousMillisKd to the current time
+    previousMillisKd = currentMillisKd;
+
+    // Check if the state has changed
+    if (currentStateKd != previousStateKd) {
+      // Print different messages based on the state
+      if (currentStateKd) {
+        Serial.println("The boolean variable has changed to true!");
+      } else {
+        Serial.println("The boolean variable has changed to false!");
+      }
+      // Update the previous state to the current state
+      previousStateKd = currentStateKd;
+    }
+  }
 }
 
   void getData()  // Function to obtain the actual values of position, velocity and torque
@@ -177,11 +219,16 @@ void IRAM_ATTR myInterruptFunction() {
     #endif
 
     #if buttonTest
-      if(has_interrupted)
+      if (currentStateKd == true)
       {
-        Serial.println("Button pressed!");
-        has_interrupted = false;
+        // Control sin kd
+      } 
+
+      else if (currentStateKd == false)
+      {
+        // Control con kd
       }
+
     #endif
 
     #if rampTest
@@ -300,7 +347,7 @@ void setup()
   // Configure the pin as an input with internal pull-up resistor
   pinMode(CTRL_PIN, INPUT_PULLUP);
   pinMode(BUTTON_PIN, INPUT_PULLUP); 
-  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), myInterruptFunction, FALLING); // Configure the interrupt
+  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), toggleBoolean, FALLING); // Configure the interrupt
 
   #if DynTest //Usar el dinamometro externo
   // Communication with the Virtual Torque Sensor
@@ -412,6 +459,11 @@ void loop()
         while(digitalRead(CTRL_PIN) && !flag)
         {
           currentMillis = millis();
+
+          #if buttonTest
+          updateKd();
+          #endif
+
           if (currentMillis - previousMillisDuration >= (duration * 1000))
           {
             flag = true;
