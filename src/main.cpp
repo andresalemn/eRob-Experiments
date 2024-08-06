@@ -25,8 +25,8 @@ Finite State Machine (FSM) to implement control with a specific time and duratio
   float velocity;
   float degVelocity;
   float torque;
-  float minTorque = -7.0;  // Minimum allowable torque
-  float maxTorque = 7.0;  // Maximum allowable torque
+  float minTorque = -10.0;  // Minimum allowable torque
+  float maxTorque = 10.0;  // Maximum allowable torque
   float setpointTorque = 5.0;
   float dynamicTorqueSensor;
 
@@ -60,7 +60,7 @@ Finite State Machine (FSM) to implement control with a specific time and duratio
   float derivativeError;
   float previousError = 0; // Store the previous error
   float targetZero = 0.0;
-  float Kp = 10.0; // Proportional gain, adjust as needed
+  float Kp = 20.0; // Proportional gain, adjust as needed
   float Kd = 5.0; // Derivative gain, adjust as needed
   float toleranceZero = 0.5; // Define a small tolerance for zero position
   unsigned long currentZeroMillis;
@@ -222,11 +222,12 @@ void runRamp() {
       if (currentStateKd == true)
       {
         setpointTorque = (-Kd)*velocity;
+        // setpointTorque = 0.0;
       } 
 
       if (currentStateKd == false)
       {
-        setpointTorque = 15.0;
+        // setpointTorque = 15.0;
       } 
 
       if (!erob_1.setTorque(setpointTorque, 2000))
@@ -421,7 +422,6 @@ void setup()
 void loop()
 {
   #if eRobExp
-
   switch (currentState)   // Handling the state machine
   {
     case STATE_IDLE:
@@ -537,17 +537,16 @@ void loop()
 
       else if (input == OPTION_SET_TORQUE_0)
       {
+        getData();
         previousMillisPrintingFrecuency = millis();
         setpointTorque = 0.0;
         for (int i = 0; i < 100; i++)
         {
+          getData();
           if (!erob_1.setTorque(setpointTorque, 2000))
           {
             Serial.println("ERROR: SET TORQUE 0 FAILED");
           }
-
-          getData();
-
           if (currentMillis - previousMillisPrintingFrecuency >= (printingFrecuency))
           {
             previousMillisPrintingFrecuency = currentMillis;
@@ -648,7 +647,7 @@ void loop()
       else if (input == OPTION_GO_ZERO)
       {
         Serial.println("Regresando a Cero");
-        
+        getData();
         previousMillisDuration = millis();
         previousMillisFrecuency = millis();
         previousMillisPrintingFrecuency = millis();
@@ -672,9 +671,10 @@ void loop()
           }
         }
         flag = false;
+        setpointTorque = 0.0;
         for (int i = 0; i < 10; i++)    //After each control signal, torque 0 is commanded
         {
-          if (!erob_1.setTorque(0.0, 2000))
+          if (!erob_1.setTorque(setpointTorque, 2000))
           {
             Serial.println("ERROR: SET TORQUE 0 FAILED");
           }
