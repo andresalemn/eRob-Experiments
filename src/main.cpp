@@ -26,7 +26,8 @@ Finite State Machine (FSM) to implement control with a specific time and duratio
   float degVelocity;
   float torque;
   float minTorque = -10.0;  // Minimum allowable torque
-  float maxTorque = 10.0;  // Maximum allowable torque
+  float maxTorque = 10.0;   // Maximum allowable torque
+  float sat = 10.0;         // Motor's torque saturation
   float setpointTorque = -10.0;
   float dynamicTorqueSensor;
 
@@ -60,9 +61,10 @@ Finite State Machine (FSM) to implement control with a specific time and duratio
   float degposError = 0.0;
   float derivativeError;
   float previousError = 0.0; // Store the previous error
-  float targetZero = 0.0;
+  float targetPos = 0.0;
   float Kp = 20.0; // Proportional gain, adjust as needed
   float Kd = 5.0; // Derivative gain, adjust as needed
+  float Ke = 1.0; // Exponential term for the PD Control
   float toleranceZero = 0.5; // Define a small tolerance for zero position
   unsigned long currentZeroMillis;
   unsigned long previousZeroMillis = 0;
@@ -163,6 +165,18 @@ void runRamp() {
     }
   }
 
+float Sign(float number) // Sign function
+{
+    if (number < 0)
+    {
+        return -1.0;
+    }
+    else
+    {
+        return 1.0;
+    }
+}
+
   void updateKd() // Function to update the kd condition
   {
     // Get the current time
@@ -191,7 +205,7 @@ void runRamp() {
   {
     position = erob_1.getPosition();
     degPosition = position* (180.0 / PI);
-    degposError = targetZero - degPosition;
+    degposError = targetPos - degPosition;
     velocity = erob_1.getVelocity();
     degVelocity = velocity* (180.0 / PI);
     torque = erob_1.getTorque();
@@ -270,27 +284,36 @@ void runRamp() {
     if (currentZeroMillis - previousZeroMillis >= intervalZero) {
         previousZeroMillis = currentZeroMillis;
         
-        // Get the current position
+        // Get the current position and velocity
         position = erob_1.getPosition();
         degPosition = position * (180.0 / PI);
+          velocity = erob_1.getVelocity();
         
         // Check if we are within the tolerance range
         if (abs(degPosition) > toleranceZero) {
-            // Calculate the error
-            posError = targetZero - position; // Target is 0, so error is -position
 
+            // Calculate the error
+            // posError = targetPos - position; // When target is 0, error is -position
             // Calculate the derivative of the error
-            derivativeError = (posError - previousError) / intervalZero;
+            // derivativeError = (posError - previousError) / intervalZero;
 
             // Calculate the torque using the PD controller
-            setpointTorque = Kp * posError + Kd * derivativeError;
+            // setpointTorque = Kp * posError + Kd * derivativeError;
+            setpointTorque = - Kp * (position - targetPos) - Kd * velocity - Ke * Sign(position - targetPos) * pow(fabs(position - targetPos), 0.5);
+
             
             // Apply torque limits
-            if (setpointTorque > maxTorque) {
-                setpointTorque = maxTorque;
-            } else if (setpointTorque < minTorque) {
-                setpointTorque = minTorque;
-            }
+            // if (setpointTorque > maxTorque) {
+            //     setpointTorque = maxTorque;
+            // } else if (setpointTorque < minTorque) {
+            //     setpointTorque = minTorque;
+            // }
+
+            // Motors torque saturation
+            if (fabs(setpointTorque) > sat)
+            {
+              setpointTorque = Sign(setpointTorque) * sat;
+            }            
 
             // Apply torque to the motor
             if (!erob_1.setTorque(setpointTorque, 2000)) {
