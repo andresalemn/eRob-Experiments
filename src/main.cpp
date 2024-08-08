@@ -32,7 +32,7 @@ Finite State Machine (FSM) to implement control with a specific time and duratio
   float dynamicTorqueSensor;
 
   //Time Variables
-  float duration = 5.0; //in Sec
+  float duration = 4.0; //in Sec
   const long frecuency = 10; //in Hz
   const long printingFrecuency = 100; //in ms
   unsigned long currentMillis;
@@ -62,9 +62,10 @@ Finite State Machine (FSM) to implement control with a specific time and duratio
   float derivativeError;
   float previousError = 0.0; // Store the previous error
   float targetPos = 0.0;
-  float Kp = 20.0; // Proportional gain, adjust as needed
-  float Kd = 5.0; // Derivative gain, adjust as needed
-  float Ke = 1.0; // Exponential term for the PD Control
+  float Kp = 25.0;  // Proportional gain, adjust as needed
+  float Kd = 5.0;   // Derivative gain, adjust as needed
+  float Ke = 1.0;   // Exponential term for the PD Control
+  float p_e = 0.5;  // Value of the exponent
   float toleranceZero = 0.5; // Define a small tolerance for zero position
   unsigned long currentZeroMillis;
   unsigned long previousZeroMillis = 0;
@@ -165,17 +166,17 @@ void runRamp() {
     }
   }
 
-float Sign(float number) // Sign function
-{
-    if (number < 0)
-    {
-        return -1.0;
-    }
-    else
-    {
-        return 1.0;
-    }
-}
+  float Sign(float number) // Sign function
+  {
+      if (number < 0)
+      {
+          return -1.0;
+      }
+      else
+      {
+          return 1.0;
+      }
+  }
 
   void updateKd() // Function to update the kd condition
   {
@@ -238,7 +239,6 @@ float Sign(float number) // Sign function
       if (currentStateKd == true)
       {
         setpointTorque = (-Kd)*velocity;
-        // setpointTorque = 0.0;
       } 
 
       if (currentStateKd == false)
@@ -299,8 +299,7 @@ float Sign(float number) // Sign function
 
             // Calculate the torque using the PD controller
             // setpointTorque = Kp * posError + Kd * derivativeError;
-            setpointTorque = - Kp * (position - targetPos) - Kd * velocity - Ke * Sign(position - targetPos) * pow(fabs(position - targetPos), 0.5);
-
+            setpointTorque = - Kp * (position - targetPos) - Kd * velocity - Ke * Sign(position - targetPos) * pow(fabs(position - targetPos), p_e);
             
             // Apply torque limits
             // if (setpointTorque > maxTorque) {
@@ -346,8 +345,9 @@ float Sign(float number) // Sign function
 
     #if buttonTest
       // Serial.printf("Setpoint= %f, Torque= %f, Position= %f, Velocidad= %f\n", setpointTorque, torque, degPosition, degVelocity);
-      Serial.printf("SP_Torque= %f, Torque= %f, SP_Pos= %f, Position= %f, Velocidad= %f\n", setpointTorque, torque, 0.0, degPosition, degVelocity);
+      // Serial.printf("SP_Torque= %f, Torque= %f, SP_Pos= %f, Position= %f, Velocity= %f\n", setpointTorque, torque, 0.0, degPosition, degVelocity);
       // Serial.printf("SP_Pos= %f, Position= %f, Pos_Error= %f, Velocity= %f\n", 0.0, degPosition, degposError, degVelocity);
+      Serial.printf("SP_Pos= %f, Position= %f, Velocity= %f\n", 0.0, degPosition, degVelocity);
     #endif
   }
 
@@ -373,10 +373,15 @@ float Sign(float number) // Sign function
       Serial.printf("\nYou have set the duration of the experiment to: %f seconds\n", duration);
     }
 
-    if (flag == 5) // Showing the current variables
+    if (flag == 5) // Seconds changed
+    {
+      Serial.printf("\nYou have set the Exponent (pe) to: %f\n", p_e);
+    }
+
+    if (flag == 6) // Showing the current variables
     {
       Serial.println("\nThe current values are:");
-      Serial.printf("Setpoint= %f, kP= %f, kD= %f, Duration= %f\n", setpointTorque, Kp, Kd, duration);
+      Serial.printf("Setpoint= %f, kP= %f, kD= %f, p_e= %f, Duration= %f\n", setpointTorque, Kp, Kd, p_e, duration);
     }
   }
 
@@ -442,7 +447,7 @@ void setup()
   delay(100);
   #endif 
 
-  printChange(5); // Prints the variables of interest current values
+  printChange(6); // Prints the variables of interest current values
   
 }
 
@@ -610,11 +615,11 @@ void loop()
       {     
         bool inputReceived = false;
         Serial.println("Press the correct character followed by the new value.");
-        Serial.println("| S for Setpoint | P for kP | D for kD | T for Time | E for exit |");
+        Serial.println("| S for Setpoint | P for kP | D for kD | T for Time | E for Exp | N for Null |");
         Serial.println("- For example: 'S5' sets the setpointTorque variable to 5");
         Serial.printf("- Remember the torque limits [%f  %f]\n", minTorque, maxTorque);        
-        Serial.println("- The letter E will only print the current values without changing any of them");
-        printChange(5); // Prints the variables of interest current values
+        Serial.println("- The letter N will only print the current values without changing any of them");
+        printChange(6); // Prints the variables of interest current values
         Serial.println("\nWaiting for command...");
 
         while (!inputReceived) {
@@ -656,12 +661,18 @@ void loop()
                     duration = Serial.parseFloat();
                     flags = 4;
                   }
-                  break;                
-                case 'E':
-                  flags = 5;
+                  break;    
+                  case 'E':
+                  if (Serial.available() > 0) {
+                    p_e = Serial.parseFloat();
+                    flags = 5;
+                  }
+                  break;              
+                case 'N':
+                  flags = 6;
                   break;
                 default:
-                  Serial.println("Invalid command. Please enter 'S', 'P', 'D', 'T', or 'E'.");
+                  Serial.println("Invalid command. Please enter 'S', 'P', 'D', 'T', 'E' or 'N'.");
                   continue;
               }
               printChange(flags);
@@ -681,8 +692,9 @@ void loop()
 
         while(digitalRead(CTRL_PIN) && !flag)
         {
+          getData();
           currentMillis = millis();
-          if (currentMillis - previousMillisDuration >= (duration * 2000))
+          if (currentMillis - previousMillisDuration >= (duration * 2500))
           {
             flag = true;
           }
